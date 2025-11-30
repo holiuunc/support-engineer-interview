@@ -25,7 +25,7 @@ You have been provided with a NextJS TypeScript banking application that has sev
 2. **Investigate reported issues** and document root causes
 3. **Fix the identified bugs** with proper solutions
 4. **Write clear documentation for each bug, and submit this via e-mail,** explaining:
-   - What caused each bug
+   - What caused each
    - How the fix resolves it
    - What preventive measures can avoid similar issues
 5. **[Extra Credit] Add tests** to verify your fixes
