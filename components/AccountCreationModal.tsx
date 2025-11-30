@@ -28,14 +28,14 @@ export function AccountCreationModal({ onClose, onSuccess }: AccountCreationModa
 
   return (
     <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-md w-full p-6">
-        <h3 className="text-lg font-medium text-gray-900 mb-4">Open New Account</h3>
+      <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6">
+        <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Open New Account</h3>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Account Type</label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Account Type</label>
             <div className="space-y-2">
-              <label className="flex items-center">
+              <label className="flex items-center text-gray-900 dark:text-gray-100">
                 <input
                   type="radio"
                   value="checking"
@@ -45,7 +45,7 @@ export function AccountCreationModal({ onClose, onSuccess }: AccountCreationModa
                 />
                 <span>Checking Account</span>
               </label>
-              <label className="flex items-center">
+              <label className="flex items-center text-gray-900 dark:text-gray-100">
                 <input
                   type="radio"
                   value="savings"
@@ -58,13 +58,13 @@ export function AccountCreationModal({ onClose, onSuccess }: AccountCreationModa
             </div>
           </div>
 
-          {error && <div className="text-sm text-red-600">{error}</div>}
+          {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
 
           <div className="flex justify-end space-x-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-600"
             >
               Cancel
             </button>
