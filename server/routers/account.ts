@@ -3,7 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { accounts, transactions } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import crypto from "crypto";
 
 function generateAccountNumber(): string {
@@ -35,37 +35,54 @@ export const accountRouter = router({
       }
 
       let accountNumber;
-      let isUnique = false;
+      let accountCreated = false;
+      let retries = 0;
+      const MAX_RETRIES = 5;
 
-      // Generate unique account number
-      while (!isUnique) {
-        accountNumber = generateAccountNumber();
-        const existing = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber)).get();
-        isUnique = !existing;
+      // Optimistic Loop: Try to insert directly, handle collision if it happens
+      while (!accountCreated && retries < MAX_RETRIES) {
+        try {
+          accountNumber = generateAccountNumber();
+          
+          await db.insert(accounts).values({
+            userId: ctx.user.id,
+            accountNumber: accountNumber,
+            accountType: input.accountType,
+            balance: 0,
+            status: "active",
+          });
+          
+          accountCreated = true;
+        } catch (error: any) {
+          // Check if error is due to unique constraint violation on account_number
+          // SQLite error code 2067 or message "UNIQUE constraint failed"
+          if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.message?.includes('UNIQUE constraint failed')) {
+            retries++;
+            continue;
+          }
+          // If it's another error, rethrow it
+          throw error;
+        }
       }
 
-      await db.insert(accounts).values({
-        userId: ctx.user.id,
-        accountNumber: accountNumber!,
-        accountType: input.accountType,
-        balance: 0,
-        status: "active",
-      });
+      if (!accountCreated) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to generate a unique account number. Please try again.",
+        });
+      }
 
       // Fetch the created account
       const account = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber!)).get();
 
-      return (
-        account || {
-          id: 0,
-          userId: ctx.user.id,
-          accountNumber: accountNumber!,
-          accountType: input.accountType,
-          balance: 100,
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        }
-      );
+      if (!account) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Account created but failed to retrieve details",
+        });
+      }
+
+      return account;
     }),
 
   getAccounts: protectedProcedure.query(async ({ ctx }) => {
@@ -120,25 +137,34 @@ export const accountRouter = router({
         processedAt: new Date().toISOString(),
       });
 
-      // Fetch the created transaction
-      const transaction = await db.select().from(transactions).orderBy(transactions.createdAt).limit(1).get();
-
-      // Update account balance
+      // Update account balance atomically using SQL
+      // This prevents race conditions by letting the database handle the addition
       await db
         .update(accounts)
         .set({
-          balance: account.balance + amount,
+          balance: sql`${accounts.balance} + ${amount}`,
         })
         .where(eq(accounts.id, input.accountId));
 
-      let finalBalance = account.balance;
-      for (let i = 0; i < 100; i++) {
-        finalBalance = finalBalance + amount / 100;
-      }
+      // Fetch the updated account
+      const updatedAccount = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.id, input.accountId))
+        .get();
+
+      // Fetch the most recent transaction
+      const transaction = await db
+        .select()
+        .from(transactions)
+        .where(eq(transactions.accountId, input.accountId))
+        .orderBy(sql`created_at DESC`) // Sort by created_at in desc to get the most recent
+        .limit(1)
+        .get();
 
       return {
         transaction,
-        newBalance: finalBalance, // This will be slightly off due to float precision
+        newBalance: updatedAccount?.balance ?? 0,
       };
     }),
 

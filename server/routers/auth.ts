@@ -5,9 +5,21 @@ import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
-import zxcvbn from "zxcvbn";
-import { encrypt } from "@/lib/crypto/encryption";
+import { eq, or } from "drizzle-orm";
+// OPTIMIZATION: Use core + common language package to reduce memory footprint
+import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
+import * as zxcvbnCommonPackage from "@zxcvbn-ts/language-common";
+import { encrypt, hashSSN } from "@/lib/crypto/encryption";
+
+// Initialize zxcvbn options
+const options = {
+  translations: zxcvbnCommonPackage.translations,
+  graphs: zxcvbnCommonPackage.adjacencyGraphs,
+  dictionary: {
+    ...zxcvbnCommonPackage.dictionary,
+  },
+};
+zxcvbnOptions.setOptions(options);
 
 // Strong password validation schema following NIST SP 800-63B guidelines
 const passwordSchema = z
@@ -41,13 +53,27 @@ export const authRouter = router({
       })
     )
     .mutation(async ({ input, ctx }) => {
-      const existingUser = await db.select().from(users).where(eq(users.email, input.email)).get();
+      const ssnHash = hashSSN(input.ssn);
+
+      // Check for existing email OR existing SSN
+      const existingUser = await db
+        .select()
+        .from(users)
+        .where(or(eq(users.email, input.email), eq(users.ssnHash, ssnHash)))
+        .get();
 
       if (existingUser) {
-        throw new TRPCError({
-          code: "CONFLICT",
-          message: "User already exists",
-        });
+        if (existingUser.email === input.email) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: "User with this email already exists",
+          });
+        } else {
+           throw new TRPCError({
+            code: "CONFLICT",
+            message: "User with this SSN already exists",
+          });
+        }
       }
 
       const hashedPassword = await bcrypt.hash(input.password, 10);
@@ -56,6 +82,7 @@ export const authRouter = router({
       await db.insert(users).values({
         ...input,
         ssn: encryptedSSN,
+        ssnHash: ssnHash, // Store the hash for uniqueness checks
         password: hashedPassword,
       });
 
@@ -119,6 +146,10 @@ export const authRouter = router({
         });
       }
 
+      // Invalidate all existing sessions for this user (security best practice for banking)
+      // This ensures only the most recent login session is valid
+      await db.delete(sessions).where(eq(sessions.userId, user.id));
+
       const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || "temporary-secret-for-interview", {
         expiresIn: "7d",
       });
@@ -142,29 +173,42 @@ export const authRouter = router({
     }),
 
   logout: publicProcedure.mutation(async ({ ctx }) => {
-    if (ctx.user) {
-      // Delete session from database
-      let token: string | undefined;
-      if ("cookies" in ctx.req) {
-        token = (ctx.req as any).cookies.session;
-      } else {
-        const cookieHeader = ctx.req.headers.get?.("cookie") || (ctx.req.headers as any).cookie;
-        token = cookieHeader
-          ?.split("; ")
-          .find((c: string) => c.startsWith("session="))
-          ?.split("=")[1];
-      }
-      if (token) {
+    let sessionDeleted = false;
+
+    // Extract session token from cookie
+    let token: string | undefined;
+    if ("cookies" in ctx.req) {
+      token = (ctx.req as any).cookies.session;
+    } else {
+      const cookieHeader = ctx.req.headers.get?.("cookie") || (ctx.req.headers as any).cookie;
+      token = cookieHeader
+        ?.split("; ")
+        .find((c: string) => c.startsWith("session="))
+        ?.split("=")[1];
+    }
+
+    // Delete session from database if token exists
+    if (token) {
+      // Verify session exists before deletion
+      const existingSession = await db.select().from(sessions).where(eq(sessions.token, token)).get();
+      if (existingSession) {
         await db.delete(sessions).where(eq(sessions.token, token));
+        // Verify deletion succeeded
+        const stillExists = await db.select().from(sessions).where(eq(sessions.token, token)).get();
+        sessionDeleted = !stillExists;
       }
     }
 
+    // Always clear the cookie for security (even if DB deletion failed)
     if ("setHeader" in ctx.res) {
       ctx.res.setHeader("Set-Cookie", `session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
     } else {
       (ctx.res as Headers).set("Set-Cookie", `session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
     }
 
-    return { success: true, message: ctx.user ? "Logged out successfully" : "No active session" };
+    return {
+      success: sessionDeleted || !token,
+      message: sessionDeleted ? "Logged out successfully" : !token ? "No active session" : "Logout failed - session may still be active"
+    };
   }),
 });

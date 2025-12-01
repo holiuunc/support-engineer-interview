@@ -5,11 +5,16 @@ const IV_LENGTH = 16;
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
 
+// Cache the key at module level
+let CACHED_KEY: Buffer | null = null;
+
 /**
  * Get the encryption key from environment variable
  * In production, use a proper key management service (AWS KMS, Azure Key Vault, etc.)
  */
 function getEncryptionKey(): Buffer {
+  if (CACHED_KEY) return CACHED_KEY;
+
   const keyHex = process.env.ENCRYPTION_KEY;
 
   if (!keyHex) {
@@ -28,7 +33,25 @@ function getEncryptionKey(): Buffer {
     );
   }
 
+  CACHED_KEY = key;
   return key;
+}
+
+/**
+ * Hash SSN deterministically for uniqueness checks (Blind Index)
+ * Uses HMAC-SHA256 with a separate PEPPER
+ */
+export function hashSSN(ssn: string): string {
+  // In production, use a separate PEPPER environment variable
+  const pepper = process.env.SSN_PEPPER || 'default-pepper-do-not-use-in-prod';
+  
+  // Remove non-digit characters to normalize before hashing
+  const normalizedSSN = ssn.replace(/\D/g, '');
+  
+  return crypto
+    .createHmac('sha256', pepper)
+    .update(normalizedSSN)
+    .digest('hex');
 }
 
 /**

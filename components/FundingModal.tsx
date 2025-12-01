@@ -30,6 +30,7 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
     },
   });
 
+  const utils = trpc.useUtils(); // Get the tRPC context utilities
   const fundingType = watch("fundingType");
   const fundAccountMutation = trpc.account.fundAccount.useMutation();
 
@@ -49,6 +50,8 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
         },
       });
 
+      // Invalidate the cache for getAccounts query to refetch the latest balance
+      await utils.account.getAccounts.invalidate(); 
       onSuccess();
     } catch (err: any) {
       setError(err.message || "Failed to fund account");

@@ -4,26 +4,28 @@ import * as schema from "./schema";
 
 const dbPath = "bank.db";
 
-// Singleton pattern for database connection
-let sqliteConnection: Database.Database | null = null;
+// Singleton pattern for database connection using globalThis for Next.js hot reloading
+const globalForDb = globalThis as unknown as {
+  sqliteConnection: Database.Database | undefined;
+};
 
 function getSqliteConnection(): Database.Database {
-  if (!sqliteConnection) {
-    sqliteConnection = new Database(dbPath);
+  if (!globalForDb.sqliteConnection) {
+    globalForDb.sqliteConnection = new Database(dbPath);
     // Enable WAL mode for better concurrency
-    sqliteConnection.pragma('journal_mode = WAL');
+    globalForDb.sqliteConnection.pragma('journal_mode = WAL');
   }
-  return sqliteConnection;
+  return globalForDb.sqliteConnection;
 }
 
-const sqlite = getSqliteConnection();
+export const sqlite = getSqliteConnection();
 export const db = drizzle(sqlite, { schema });
 
 // Graceful shutdown function
 export function closeDb() {
-  if (sqliteConnection) {
-    sqliteConnection.close();
-    sqliteConnection = null;
+  if (globalForDb.sqliteConnection) {
+    globalForDb.sqliteConnection.close();
+    globalForDb.sqliteConnection = undefined;
   }
 }
 
@@ -43,7 +45,7 @@ export function initDb() {
   const conn = getSqliteConnection();
 
   // Create tables if they don't exist
-  sqlite.exec(`
+  conn.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT UNIQUE NOT NULL,
@@ -53,6 +55,7 @@ export function initDb() {
       phone_number TEXT NOT NULL,
       date_of_birth TEXT NOT NULL,
       ssn TEXT NOT NULL,
+      ssn_hash TEXT UNIQUE,
       address TEXT NOT NULL,
       city TEXT NOT NULL,
       state TEXT NOT NULL,

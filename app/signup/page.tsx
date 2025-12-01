@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
-import zxcvbn from "zxcvbn";
+// OPTIMIZATION: Use core + common language package to significantly reduce bundle size (from ~800KB to ~100KB)
+// compared to the full 'zxcvbn' package.
+import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
+import * as zxcvbnCommonPackage from "@zxcvbn-ts/language-common";
 
 type SignupFormData = {
   email: string;
@@ -26,6 +29,18 @@ export default function SignupPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [error, setError] = useState("");
+
+  // Initialize zxcvbn options once
+  useEffect(() => {
+    const options = {
+      translations: zxcvbnCommonPackage.translations,
+      graphs: zxcvbnCommonPackage.adjacencyGraphs,
+      dictionary: {
+        ...zxcvbnCommonPackage.dictionary,
+      },
+    };
+    zxcvbnOptions.setOptions(options);
+  }, []);
 
   const {
     register,
