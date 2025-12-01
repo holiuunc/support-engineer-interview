@@ -158,11 +158,13 @@
 ### PERF-404: Transaction Sorting
 *   **Root Cause**: The `getTransactions` query returned transactions in insertion order (or undefined order), making the UI confusing as older transactions could appear at the top of the list.
 *   **Fix Implementation**:
-    *   Added `.orderBy(desc(transactions.createdAt))` to the query in `server/routers/account.ts`.
+    *   Added `.orderBy(desc(transactions.createdAt), desc(transactions.id))` to the query in `server/routers/account.ts`.
     *   Imported `desc` from `drizzle-orm`.
+    *   Uses **dual-key sorting**: primary sort by timestamp, secondary sort by ID for deterministic ordering when multiple transactions have identical timestamps.
     *   Transactions now return in reverse chronological order (newest first), providing a better user experience.
 *   **Preventive Measures**:
     *   Always explicitly specify sort order for queries, never rely on insertion order.
+    *   Use secondary sort keys (like ID) when primary key (like timestamp) may have duplicates.
     *   Include sorting requirements in API design specifications.
 
 ### PERF-405: Missing Transactions
@@ -179,11 +181,13 @@
 ### VAL-202: Date of Birth Validation
 *   **Root Cause**: The signup form accepted any date string without validation, allowing users to enter future dates or dates indicating they are under 18 years old, creating compliance risks for a financial application.
 *   **Fix Implementation**:
-    *   **Server-side** (`server/routers/auth.ts`): Added `.refine()` validation to the `dateOfBirth` field that calculates age accounting for month and day differences, requiring users to be at least 18 years old. Added second `.refine()` to prevent future dates.
-    *   **Client-side** (`app/signup/page.tsx`): Added `validate` functions for `notFuture` and `minimumAge` checks, providing immediate feedback to users.
+    *   Created shared `calculateAge()` utility function in `lib/utils.ts` (server) and `lib/client-utils.ts` (client) that properly handles month/day edge cases.
+    *   **Server-side** (`server/routers/auth.ts`): Added single `.refine()` validation using `calculateAge(dob) >= 18`. This elegantly handles both future dates (returns negative age) and underage users.
+    *   **Client-side** (`app/signup/page.tsx`): Added single `validate` function using `calculateAge(value) >= 18`, matching server implementation and providing immediate feedback.
     *   Age calculation properly handles edge cases where birthday hasn't occurred yet this year.
 *   **Preventive Measures**:
     *   Always validate age-restricted services at both client and server levels.
+    *   Use shared utility functions to ensure consistent validation logic across frontend and backend.
     *   For financial applications, implement KYC (Know Your Customer) age verification.
     *   Consider adding ID verification for age-restricted services.
     *   Document edge cases and limitations (e.g., timezone considerations) in code comments.
@@ -215,12 +219,16 @@
 ### VAL-201: Email Validation
 *   **Root Cause**: The ticket raised two concerns: (1) emails are converted to lowercase without notification, and (2) no validation for TLD typos like ".con" instead of ".com".
 *   **Fix Implementation**:
-    *   **Uppercase conversion**: Determined this is **intentional and correct** behavior following RFC 5321 standards and industry best practices. Email addresses are case-insensitive in practice, and every major service (Gmail, Facebook, etc.) normalizes to lowercase without notification. No changes made.
-    *   **TLD validation**: Determined that comprehensive TLD validation is impractical due to 1000+ valid TLDs and constant growth. Zod's built-in `.email()` validation provides sufficient protection against malformed addresses. Opted not to implement complex TLD typo detection to avoid false positives and maintenance burden.
+    *   **Uppercase conversion**: Determined this is **intentional and correct** behavior following RFC 5321 standards and industry best practices. Email addresses are case-insensitive in practice, and every major service (Gmail, Facebook, etc.) normalizes to lowercase without notification. Existing `.toLowerCase()` behavior maintained.
+    *   **Domain typo validation**: Implemented blocklist for common domain misspellings on both client and server.
+    *   **Server-side** (`server/routers/auth.ts`): Added `.refine()` to email schema that blocks common typos: `gnail.com`, `gmil.com`, `yaho.com`, `hotmial.com`, `outlok.com`.
+    *   **Client-side** (`app/signup/page.tsx`): Added `validate` function checking the same domain blocklist with helpful error message: "Invalid email domain. Did you mean gmail.com, yahoo.com, etc?".
+    *   **Design Decision**: Did not implement comprehensive TLD validation due to 1000+ valid TLDs and constant growth. Focused on blocking common typos rather than validating all possible TLDs to avoid false positives.
 *   **Preventive Measures**:
     *   Follow industry standards (RFCs) for email handling rather than creating custom behaviors.
     *   Rely on well-tested validation libraries (Zod, validator.js) for common formats.
-    *   Document intentional design decisions to avoid future confusion.
+    *   Use targeted blocklists for known typos rather than attempting comprehensive TLD validation.
+    *   Consider extracting blocked domain list to configuration constant for easier maintenance.
     *   If enhanced email validation is needed in the future, consider email verification workflows (send confirmation email) rather than format validation.
 
 ### VAL-205: Zero Amount Funding

@@ -221,25 +221,7 @@ export default function SignupPage() {
                 <input
                   {...register("dateOfBirth", {
                     required: "Date of birth is required",
-                    validate: {
-                      notFuture: (value) => {
-                        const birthDate = new Date(value);
-                        const today = new Date();
-                        return birthDate <= today || "Date of birth cannot be in the future";
-                      },
-                      minimumAge: (value) => {
-                        const birthDate = new Date(value);
-                        const today = new Date();
-                        const age = today.getFullYear() - birthDate.getFullYear();
-                        const monthDiff = today.getMonth() - birthDate.getMonth();
-                        const dayDiff = today.getDate() - birthDate.getDate();
-
-                        // Adjust age if birthday hasn't occurred this year
-                        const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
-
-                        return actualAge >= 18 || "You must be at least 18 years old to create an account";
-                      },
-                    },
+                    validate: (value) => calculateAge(value) >= 18 || "You must be at least 18 years old",
                   })}
                   type="date"
                   className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm p-2 border"
