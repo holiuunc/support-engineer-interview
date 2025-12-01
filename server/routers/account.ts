@@ -3,8 +3,9 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { accounts, transactions } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, desc } from "drizzle-orm";
 import crypto from "crypto";
+import { isValidLuhn } from "@/lib/utils/validation";
 
 function generateAccountNumber(): string {
   // Use cryptographically secure random number generator (CSPRNG)
@@ -95,12 +96,35 @@ export const accountRouter = router({
     .input(
       z.object({
         accountId: z.number(),
-        amount: z.number().positive(),
-        fundingSource: z.object({
-          type: z.enum(["card", "bank"]),
-          accountNumber: z.string(),
-          routingNumber: z.string().optional(),
-        }),
+        amount: z.number().min(0.01, "Amount must be at least $0.01"),
+        fundingSource: z
+          .object({
+            type: z.enum(["card", "bank"]),
+            accountNumber: z.string(),
+            routingNumber: z.string().optional(),
+          })
+          .refine(
+            (data) => {
+              if (data.type === "bank") {
+                return !!data.routingNumber && /^\d{9}$/.test(data.routingNumber);
+              }
+              return true;
+            },
+            {
+              message: "Routing number is required for bank transfers and must be 9 digits",
+            }
+          )
+          .refine(
+            (data) => {
+              if (data.type === "card") {
+                return isValidLuhn(data.accountNumber);
+              }
+              return true;
+            },
+            {
+              message: "Invalid card number. Please check the card number and try again.",
+            }
+          ),
       })
     )
     .mutation(async ({ input, ctx }) => {
@@ -135,6 +159,7 @@ export const accountRouter = router({
         description: `Funding from ${input.fundingSource.type}`,
         status: "completed",
         processedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       });
 
       // Update account balance atomically using SQL
@@ -192,17 +217,13 @@ export const accountRouter = router({
       const accountTransactions = await db
         .select()
         .from(transactions)
-        .where(eq(transactions.accountId, input.accountId));
-
-      const enrichedTransactions = [];
-      for (const transaction of accountTransactions) {
-        const accountDetails = await db.select().from(accounts).where(eq(accounts.id, transaction.accountId)).get();
-
-        enrichedTransactions.push({
-          ...transaction,
-          accountType: accountDetails?.accountType,
-        });
-      }
+        .where(eq(transactions.accountId, input.accountId))
+        .orderBy(desc(transactions.createdAt), desc(transactions.id));
+  
+      const enrichedTransactions = accountTransactions.map((transaction) => ({
+        ...transaction,
+        accountType: account.accountType,
+      }));
 
       return enrichedTransactions;
     }),

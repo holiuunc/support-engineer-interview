@@ -6,6 +6,7 @@ import { publicProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
 import { eq, or } from "drizzle-orm";
+import { calculateAge } from "../../lib/utils"; // Moved to a utility file
 // OPTIMIZATION: Use core + common language package to reduce memory footprint
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
 import { dictionary, adjacencyGraphs } from "@zxcvbn-ts/language-common";
@@ -38,12 +39,19 @@ export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
-        email: z.string().email().toLowerCase(),
+        email: z.string().email().toLowerCase()
+          .refine((email) => {
+            const domain = email.split('@')[1];
+            const blockedDomains = ['gnail.com', 'gmil.com', 'yaho.com', 'hotmial.com', 'outlok.com'];
+            return !blockedDomains.includes(domain);
+          }, "Invalid email domain. Did you mean gmail.com, yahoo.com, etc?"),
         password: passwordSchema,
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         phoneNumber: z.string().regex(/^\+?\d{10,15}$/),
-        dateOfBirth: z.string(),
+        dateOfBirth: z.string().refine((dob) => {
+          return calculateAge(dob) >= 18;
+        }, "You must be at least 18 years old to sign up."),
         ssn: z.string().regex(/^\d{9}$/),
         address: z.string().min(1),
         city: z.string().min(1),

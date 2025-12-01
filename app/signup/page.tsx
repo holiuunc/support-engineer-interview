@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
+import { calculateAge } from "@/lib/client-utils"; // Import the client-side age calculation utility
 // OPTIMIZATION: Use core + common language package to significantly reduce bundle size (from ~800KB to ~100KB)
 // compared to the full 'zxcvbn' package.
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
@@ -101,6 +102,14 @@ export default function SignupPage() {
                       value: /^\S+@\S+$/i,
                       message: "Invalid email address",
                     },
+                    validate: (email) => {
+                      const domain = email.split('@')[1];
+                      const blockedDomains = ['gnail.com', 'gmil.com', 'yaho.com', 'hotmial.com', 'outlok.com'];
+                      if (blockedDomains.includes(domain)) {
+                        return "Invalid email domain. Did you mean gmail.com, yahoo.com, etc?";
+                      }
+                      return true;
+                    }
                   })}
                   type="email"
                   className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm p-2 border"
@@ -210,7 +219,28 @@ export default function SignupPage() {
                   Date of Birth
                 </label>
                 <input
-                  {...register("dateOfBirth", { required: "Date of birth is required" })}
+                  {...register("dateOfBirth", {
+                    required: "Date of birth is required",
+                    validate: {
+                      notFuture: (value) => {
+                        const birthDate = new Date(value);
+                        const today = new Date();
+                        return birthDate <= today || "Date of birth cannot be in the future";
+                      },
+                      minimumAge: (value) => {
+                        const birthDate = new Date(value);
+                        const today = new Date();
+                        const age = today.getFullYear() - birthDate.getFullYear();
+                        const monthDiff = today.getMonth() - birthDate.getMonth();
+                        const dayDiff = today.getDate() - birthDate.getDate();
+
+                        // Adjust age if birthday hasn't occurred this year
+                        const actualAge = monthDiff < 0 || (monthDiff === 0 && dayDiff < 0) ? age - 1 : age;
+
+                        return actualAge >= 18 || "You must be at least 18 years old to create an account";
+                      },
+                    },
+                  })}
                   type="date"
                   className="mt-1 block w-full rounded-md border-gray-300 dark:border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:text-white sm:text-sm p-2 border"
                 />

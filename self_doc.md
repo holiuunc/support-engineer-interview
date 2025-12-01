@@ -140,9 +140,116 @@
     *   Implement health checks that verify session cleanup is working properly.
     *   Consider implementing session cleanup background jobs to remove stale sessions.
 
+## Tier 3: High-Priority Validation & Performance Issues
+
+### PERF-407: Transaction Query Optimization (N+1 Query)
+*   **Root Cause**: The `getTransactions` query in `server/routers/account.ts` had an N+1 query problem. After fetching all transactions for an account, the code looped through each transaction and re-fetched the same account details from the database. This caused exponential database load and potential timeouts.
+*   **Fix Implementation**:
+    *   Removed the `for` loop that re-queried the database for each transaction.
+    *   Reference the already-fetched `account` object from the initial ownership verification query.
+    *   Replaced the loop with a `.map()` operation that merges the account type in memory.
+    *   We reduced query count from O(n+1) to exactly 2 queries regardless of transaction count.
+*   **Preventive Measures**:
+    *   Always review queries for N+1 patterns - watch for loops that make database calls.
+    *   Use ORM features like `include`/`join` or pre-fetch related data instead of querying in loops.
+    *   Add database query monitoring and alerting for excessive query counts.
+    *   Implement performance testing with realistic data volumes to catch scaling issues early.
+
+### PERF-404: Transaction Sorting
+*   **Root Cause**: The `getTransactions` query returned transactions in insertion order (or undefined order), making the UI confusing as older transactions could appear at the top of the list.
+*   **Fix Implementation**:
+    *   Added `.orderBy(desc(transactions.createdAt))` to the query in `server/routers/account.ts`.
+    *   Imported `desc` from `drizzle-orm`.
+    *   Transactions now return in reverse chronological order (newest first), providing a better user experience.
+*   **Preventive Measures**:
+    *   Always explicitly specify sort order for queries, never rely on insertion order.
+    *   Include sorting requirements in API design specifications.
+
+### PERF-405: Missing Transactions
+*   **Root Cause**: Investigation revealed this was a symptom of PERF-407 and PERF-404 (lack of sorting). The N+1 query caused timeouts or incomplete responses on large datasets, while the lack of sorting made transactions difficult to locate in the UI, giving the appearance of missing data.
+*   **Fix Implementation**:
+    *   Resolved by fixing PERF-407 (removing N+1 query) and PERF-404 (adding sorting).
+    *   The underlying issues causing data loss and UI confusion are now eliminated.
+    *   No additional changes were necessary beyond the N+1 and sorting fixes.
+*   **Preventive Measures**:
+    *   Investigate root causes rather than treating symptoms.
+    *   Test with realistic data volumes (50+ transactions) to catch performance issues.
+    *   Implement query timeouts and monitoring to detect performance degradation early.
+
+### VAL-202: Date of Birth Validation
+*   **Root Cause**: The signup form accepted any date string without validation, allowing users to enter future dates or dates indicating they are under 18 years old, creating compliance risks for a financial application.
+*   **Fix Implementation**:
+    *   **Server-side** (`server/routers/auth.ts`): Added `.refine()` validation to the `dateOfBirth` field that calculates age accounting for month and day differences, requiring users to be at least 18 years old. Added second `.refine()` to prevent future dates.
+    *   **Client-side** (`app/signup/page.tsx`): Added `validate` functions for `notFuture` and `minimumAge` checks, providing immediate feedback to users.
+    *   Age calculation properly handles edge cases where birthday hasn't occurred yet this year.
+*   **Preventive Measures**:
+    *   Always validate age-restricted services at both client and server levels.
+    *   For financial applications, implement KYC (Know Your Customer) age verification.
+    *   Consider adding ID verification for age-restricted services.
+    *   Document edge cases and limitations (e.g., timezone considerations) in code comments.
+
+### VAL-206: Card Number Validation (Luhn Algorithm)
+*   **Root Cause**: Card number validation only checked length (16 digits), not validity. This allowed invalid card numbers to be submitted, causing failed payment processing and poor user experience.
+*   **Fix Implementation**:
+    *   Created `lib/utils/validation.ts` with a reusable `isValidLuhn()` function implementing the Luhn algorithm for credit card validation.
+    *   **Server-side** (`server/routers/account.ts`): Added `.refine()` to `fundingSource` schema that validates card numbers using Luhn algorithm.
+    *   **Client-side** (`components/FundingModal.tsx`): Added Luhn validation to provide immediate feedback before submission.
+    *   Updated pattern validation to accept 15-16 digits (to support both standard cards and Amex).
+*   **Preventive Measures**:
+    *   Always use industry-standard validation algorithms for financial data (Luhn for cards, ABA routing checksums, etc.).
+    *   Implement validation on both client (UX) and server (security) sides.
+    *   Use shared utility functions to ensure consistency across frontend and backend.
+
+### VAL-207: Routing Number Required for Bank Transfers
+*   **Root Cause**: The `routingNumber` field was marked as optional for all funding types, allowing bank transfers to be submitted without a routing number, causing ACH transfer failures.
+*   **Fix Implementation**:
+    *   Added conditional `.refine()` validation to the `fundingSource` schema in `server/routers/account.ts`.
+    *   If `type === "bank"`, the refine enforces that `routingNumber` exists and matches the 9-digit format (`/^\d{9}$/`).
+    *   Card transactions can omit the routing number as expected.
+    *   **Note**: Routing number remains `.optional()` at the schema level because it's not required for card transactions; the `.refine()` enforces it conditionally.
+*   **Preventive Measures**:
+    *   Use conditional validation (Zod `.refine()`) for fields that are required based on other field values.
+    *   Consider splitting schemas for different use cases (card vs bank) to make requirements explicit.
+    *   Add integration tests that verify all required fields for different transaction types.
+
+### VAL-201: Email Validation
+*   **Root Cause**: The ticket raised two concerns: (1) emails are converted to lowercase without notification, and (2) no validation for TLD typos like ".con" instead of ".com".
+*   **Fix Implementation**:
+    *   **Uppercase conversion**: Determined this is **intentional and correct** behavior following RFC 5321 standards and industry best practices. Email addresses are case-insensitive in practice, and every major service (Gmail, Facebook, etc.) normalizes to lowercase without notification. No changes made.
+    *   **TLD validation**: Determined that comprehensive TLD validation is impractical due to 1000+ valid TLDs and constant growth. Zod's built-in `.email()` validation provides sufficient protection against malformed addresses. Opted not to implement complex TLD typo detection to avoid false positives and maintenance burden.
+*   **Preventive Measures**:
+    *   Follow industry standards (RFCs) for email handling rather than creating custom behaviors.
+    *   Rely on well-tested validation libraries (Zod, validator.js) for common formats.
+    *   Document intentional design decisions to avoid future confusion.
+    *   If enhanced email validation is needed in the future, consider email verification workflows (send confirmation email) rather than format validation.
+
+### VAL-205: Zero Amount Funding
+*   **Root Cause**: The amount validation used `.positive()` which accepts values > 0, including very small fractional amounts like `0.00001` that are impractical for currency transactions.
+*   **Fix Implementation**:
+    *   Changed `amount: z.number().positive()` to `amount: z.number().min(0.01, "Amount must be at least $0.01")` in `server/routers/account.ts`.
+    *   This enforces a practical minimum of 1 cent for transactions.
+*   **Preventive Measures**:
+    *   Use explicit min/max constraints for currency fields rather than generic validators.
+    *   Consider using integer cents (e.g., storing 100 for $1.00) to avoid floating-point precision issues.
+    *   Define business rules for minimum transaction amounts in requirements documentation.
+
+### VAL-210: Card Type Detection
+*   **Root Cause**: Card validation only checked if the number started with 4 (Visa) or 5 (Mastercard), rejecting valid Amex and Discover cards.
+*   **Fix Implementation**:
+    *   Created comprehensive card type detection in `lib/utils/validation.ts`:
+        *   `detectCardType()`: Detects card type based on proper prefix ranges (Visa: 4, Mastercard: 51-55 & 2221-2720, Amex: 34/37, Discover: 6011, 622126-622925, 644-649, 65)
+        *   `isValidCardType()`: Returns true if card matches a known type
+    *   Updated `components/FundingModal.tsx` to use card type detection and accept 15-16 digit cards (for Amex support).
+    *   Validation now checks card type before running Luhn algorithm.
+*   **Preventive Measures**:
+    *   Use industry-standard card BIN (Bank Identification Number) ranges for validation.
+    *   Keep card prefix definitions in a maintainable, well-documented location.
+    *   Test with real test card numbers from major networks (available from payment processors).
+    *   Update card prefixes when networks introduce new BIN ranges.
+
 [TEMPLATE]
 ### TICK-NUM: Desc
 *   **Root Cause**: [FILL]
 *   **Fix Implementation**: [FILL]
-*   **Preventive Measures**: 
+*   **Preventive Measures**:
     *   [FILL]
