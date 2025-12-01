@@ -8,15 +8,14 @@ import { users, sessions } from "@/lib/db/schema";
 import { eq, or } from "drizzle-orm";
 // OPTIMIZATION: Use core + common language package to reduce memory footprint
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
-import * as zxcvbnCommonPackage from "@zxcvbn-ts/language-common";
+import { dictionary, adjacencyGraphs } from "@zxcvbn-ts/language-common";
 import { encrypt, hashSSN } from "@/lib/crypto/encryption";
 
 // Initialize zxcvbn options
 const options = {
-  translations: zxcvbnCommonPackage.translations,
-  graphs: zxcvbnCommonPackage.adjacencyGraphs,
+  graphs: adjacencyGraphs,
   dictionary: {
-    ...zxcvbnCommonPackage.dictionary,
+    ...dictionary,
   },
 };
 zxcvbnOptions.setOptions(options);

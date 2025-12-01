@@ -8,7 +8,7 @@ import Link from "next/link";
 // OPTIMIZATION: Use core + common language package to significantly reduce bundle size (from ~800KB to ~100KB)
 // compared to the full 'zxcvbn' package.
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
-import * as zxcvbnCommonPackage from "@zxcvbn-ts/language-common";
+import { dictionary, adjacencyGraphs } from "@zxcvbn-ts/language-common";
 
 type SignupFormData = {
   email: string;
@@ -33,10 +33,9 @@ export default function SignupPage() {
   // Initialize zxcvbn options once
   useEffect(() => {
     const options = {
-      translations: zxcvbnCommonPackage.translations,
-      graphs: zxcvbnCommonPackage.adjacencyGraphs,
+      graphs: adjacencyGraphs,
       dictionary: {
-        ...zxcvbnCommonPackage.dictionary,
+        ...dictionary,
       },
     };
     zxcvbnOptions.setOptions(options);
