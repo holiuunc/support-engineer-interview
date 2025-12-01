@@ -52,10 +52,28 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
       });
 
       // Invalidate the cache for getAccounts query to refetch the latest balance
-      await utils.account.getAccounts.invalidate(); 
+      await utils.account.getAccounts.invalidate();
       onSuccess();
     } catch (err: any) {
-      setError(err.message || "Failed to fund account");
+      // Handle tRPC/Zod validation errors
+      let errorMessage = "Failed to fund account";
+
+      if (err.message) {
+        try {
+          // Try to parse if it's a JSON string (Zod validation error)
+          const parsed = JSON.parse(err.message);
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+            errorMessage = parsed[0].message;
+          } else {
+            errorMessage = err.message;
+          }
+        } catch {
+          // If not JSON, use the message as-is
+          errorMessage = err.message;
+        }
+      }
+
+      setError(errorMessage);
     }
   };
 
@@ -75,7 +93,7 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
                 {...register("amount", {
                   required: "Amount is required",
                   pattern: {
-                    value: /^\d+\.?\d{0,2}$/,
+                    value: /^(?:0|[1-9]\d*)(?:\.\d{0,2})?$/,
                     message: "Invalid amount format",
                   },
                   min: {

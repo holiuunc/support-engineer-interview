@@ -267,6 +267,99 @@ async function runTests() {
     assert(txs[0].amount === 20, "PERF-404: Sorted new to old (20 > 10)");
     assert(txs[0].accountType === "savings", "PERF-407: Account type mapped correctly");
 
+    // --- TIER 4 TESTS ---
+
+    // 14. VAL-203: State Code Validation
+    try {
+      const authCaller = authRouter.createCaller(await createCallerContext());
+      await authCaller.signup({
+        email: `invalid_state_${Date.now()}@example.com`,
+        password: testPass,
+        firstName: "Invalid",
+        lastName: "State",
+        phoneNumber: "5551234567",
+        dateOfBirth: "1990-01-01",
+        ssn: "333445555",
+        address: "123 St",
+        city: "City",
+        state: "XX" as any, // Invalid state code
+        zipCode: "12345"
+      });
+      assert(false, "VAL-203: Should reject invalid state code 'XX'");
+    } catch (e: any) {
+      assert(
+        e.message.includes("Invalid state code") || e.message.includes("state abbreviation"),
+        "VAL-203: Invalid state code rejected correctly"
+      );
+    }
+
+    // Test valid state code
+    const validStateCaller = authRouter.createCaller(await createCallerContext());
+    const validStateUser = await validStateCaller.signup({
+      email: `valid_state_${Date.now()}@example.com`,
+      password: testPass,
+      firstName: "Valid",
+      lastName: "State",
+      phoneNumber: "5559876543",
+      dateOfBirth: "1990-01-01",
+      ssn: "444556666",
+      address: "123 St",
+      city: "San Francisco",
+      state: "CA",
+      zipCode: "94105"
+    });
+    assert(!!validStateUser, "VAL-203: Valid state code 'CA' accepted");
+
+    // 15. VAL-204: Phone Number E.164 Format
+    // Test that phone numbers are stored in E.164 format
+    const e164User = await db.select().from(users).where(eq(users.email, validStateUser.user.email)).get();
+    assert(
+      !!e164User && e164User.phoneNumber.startsWith("+1"),
+      `VAL-204: Phone stored in E.164 format (expected +1XXXXXXXXXX, got ${e164User?.phoneNumber})`
+    );
+    assert(
+      e164User?.phoneNumber === "+15559876543",
+      `VAL-204: Phone correctly transformed to E.164 (expected +15559876543, got ${e164User?.phoneNumber})`
+    );
+
+    // Test that formatted input is normalized
+    const formattedPhoneCaller = authRouter.createCaller(await createCallerContext());
+    const formattedPhoneUser = await formattedPhoneCaller.signup({
+      email: `formatted_phone_${Date.now()}@example.com`,
+      password: testPass,
+      firstName: "Formatted",
+      lastName: "Phone",
+      phoneNumber: "(555) 123-4567", // Formatted input
+      dateOfBirth: "1990-01-01",
+      ssn: "555667777",
+      address: "123 St",
+      city: "City",
+      state: "NY",
+      zipCode: "10001"
+    });
+    const formattedPhoneUserDb = await db.select().from(users).where(eq(users.email, formattedPhoneUser.user.email)).get();
+    assert(
+      formattedPhoneUserDb?.phoneNumber === "+15551234567",
+      `VAL-204: Formatted phone normalized correctly (expected +15551234567, got ${formattedPhoneUserDb?.phoneNumber})`
+    );
+
+    // 16. VAL-209: Amount Leading Zeros Prevention
+    // This is a client-side validation, so we test the regex pattern logic
+    const leadingZeroPattern = /^(?:0|[1-9]\d*)(?:\.\d{0,2})?$/;
+
+    // Valid amounts
+    assert(leadingZeroPattern.test("0"), "VAL-209: Accepts '0'");
+    assert(leadingZeroPattern.test("0.05"), "VAL-209: Accepts '0.05'");
+    assert(leadingZeroPattern.test("123.45"), "VAL-209: Accepts '123.45'");
+    assert(leadingZeroPattern.test("1000.00"), "VAL-209: Accepts '1000.00'");
+    assert(leadingZeroPattern.test("50"), "VAL-209: Accepts '50'");
+
+    // Invalid amounts (leading zeros)
+    assert(!leadingZeroPattern.test("00123.45"), "VAL-209: Rejects '00123.45'");
+    assert(!leadingZeroPattern.test("001.50"), "VAL-209: Rejects '001.50'");
+    assert(!leadingZeroPattern.test("00"), "VAL-209: Rejects '00'");
+    assert(!leadingZeroPattern.test("01"), "VAL-209: Rejects '01'");
+
 
   } catch (error) {
     console.error("Critical Test Failure:", error);

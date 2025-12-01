@@ -10,6 +10,7 @@ import { calculateAge } from "@/lib/client-utils"; // Import the client-side age
 // compared to the full 'zxcvbn' package.
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
 import { dictionary, adjacencyGraphs } from "@zxcvbn-ts/language-common";
+import { USState } from "@/lib/constants";
 
 type SignupFormData = {
   email: string;
@@ -22,7 +23,7 @@ type SignupFormData = {
   ssn: string;
   address: string;
   city: string;
-  state: string;
+  state: USState;
   zipCode: string;
 };
 
@@ -76,7 +77,25 @@ export default function SignupPage() {
       await signupMutation.mutateAsync(data);
       router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      // Handle tRPC/Zod validation errors
+      let errorMessage = "Something went wrong";
+
+      if (err.message) {
+        try {
+          // Try to parse if it's a JSON string (Zod validation error)
+          const parsed = JSON.parse(err.message);
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].message) {
+            errorMessage = parsed[0].message;
+          } else {
+            errorMessage = err.message;
+          }
+        } catch {
+          // If not JSON, use the message as-is
+          errorMessage = err.message;
+        }
+      }
+
+      setError(errorMessage);
     }
   };
 
@@ -202,6 +221,11 @@ export default function SignupPage() {
                 <input
                   {...register("phoneNumber", {
                     required: "Phone number is required",
+                    onChange: (e) => {
+                      // Strip non-numeric characters on input
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      e.target.value = digits;
+                    },
                     pattern: {
                       value: /^\d{10}$/,
                       message: "Phone number must be 10 digits",

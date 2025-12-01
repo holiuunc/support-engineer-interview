@@ -255,9 +255,49 @@
     *   Test with real test card numbers from major networks (available from payment processors).
     *   Update card prefixes when networks introduce new BIN ranges.
 
-[TEMPLATE]
-### TICK-NUM: Desc
-*   **Root Cause**: [FILL]
-*   **Fix Implementation**: [FILL]
+## Tier 4: Medium-Priority Enhancements
+
+### VAL-203: State Code Validation
+*   **Root Cause**: The signup form accepted any 2-character string for the state field (e.g., "XX", "ZZ"), allowing invalid state codes to be stored in the database. The validation only checked length, not whether the code was a valid US state.
+*   **Fix Implementation**:
+    *   Created `lib/constants.ts` to store application-level constants including `US_STATES` array with all 50 US state codes.
+    *   Exported `USState` type for TypeScript type safety: `type USState = typeof US_STATES[number]`.
+    *   **Server-side** (`server/routers/auth.ts`): Changed `state: z.string().length(2).toUpperCase()` to `state: z.enum(US_STATES)`.
+    *   **Client-side** (`app/signup/page.tsx`): Updated `SignupFormData` type to use `state: USState` instead of `state: string`.
+    *   Zod enum provides O(1) validation performance and strict TypeScript typing (`"AL" | "AK" | ... | "WY"` instead of `string`).
 *   **Preventive Measures**:
-    *   [FILL]
+    *   Use enum validation for fixed sets of values rather than pattern matching.
+    *   Store validation constants in a centralized location (`lib/constants.ts`) for reusability.
+    *   Consider dropdown select UI instead of text input for state selection to prevent user errors.
+
+### VAL-204: Phone Number Format (E.164 Standard)
+*   **Root Cause**: The signup form accepted any 10-15 digit string for phone numbers without standardization. This caused inconsistent storage formats and didn't handle user-friendly inputs with formatting (e.g., "(123) 456-7890", "123-456-7890"). Non-US numbers were stored inconsistently.
+*   **Fix Implementation**:
+    *   **Server-side** (`server/routers/auth.ts`): Implemented multi-step transformation using Zod:
+        *   `.transform((val) => val.replace(/\D/g, ''))` - Strip all non-numeric characters (parentheses, dashes, spaces)
+        *   `.refine((digits) => digits.length === 10, "Phone number must be 10 digits")` - Validate 10 digits for US numbers
+        *   `.transform((digits) => \`+1${digits}\`)` - Convert to E.164 format with +1 country code
+    *   **Client-side** (`app/signup/page.tsx`): Added `onChange` handler to strip non-numeric characters as the user types, limiting to 10 digits.
+    *   All phone numbers now stored consistently as E.164 format (e.g., "+11234567890").
+*   **Note**: Currently we only have support for US numbers, adding support for international numbers is not hard however since we're strictly checking for state codes via our other ticket, I'm making an assumption now due to lack of access to an engineer/creator of the ticket.
+*   **Preventive Measures**:
+    *   Always use international standards (E.164 for phone numbers) for data storage.
+    *   Sanitize user input on both client (UX) and server (security) sides.
+    *   Display formatted phone numbers to users while storing normalized E.164 internally.
+    *   Document the expected format in API specifications and database schema comments.
+
+### VAL-209: Amount Input Leading Zeros
+*   **Root Cause**: The funding modal's amount validation regex `/^\d+\.?\d{0,2}$/` accepted numbers with multiple leading zeros (e.g., "00123.45", "001.50"), which is confusing and unprofessional for financial inputs.
+*   **Fix Implementation**:
+    *   Updated the regex pattern in `components/FundingModal.tsx` from `/^\d+\.?\d{0,2}$/` to `/^(?:0|[1-9]\d*)(?:\.\d{0,2})?$/`.
+    *   **Regex Explanation**:
+        *   `^(?:0|[1-9]\d*)` - Either exactly "0" OR a non-zero digit followed by any number of digits (prevents leading zeros)
+        *   `(?:\.\d{0,2})?` - Optional decimal point with 0-2 digits for cents
+    *   **Valid inputs**: "0", "0.05", "123.45", "1000.00"
+    *   **Invalid inputs**: "00123.45", "001.50", "00"
+    *   Single-line change with zero bundle size impact.
+*   **Preventive Measures**:
+    *   Use precise regex patterns that match business requirements for financial inputs.
+    *   For enhanced UX, consider implementing ATM-style input (right-to-left backfill) in future iterations.
+    *   Test edge cases: single zero, decimal-only amounts, large numbers, and invalid formats.
+    *   Consider using controlled components with state management for more complex input formatting needs.

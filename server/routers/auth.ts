@@ -11,6 +11,7 @@ import { calculateAge } from "../../lib/utils"; // Moved to a utility file
 import { zxcvbn, zxcvbnOptions } from "@zxcvbn-ts/core";
 import { dictionary, adjacencyGraphs } from "@zxcvbn-ts/language-common";
 import { encrypt, hashSSN } from "@/lib/crypto/encryption";
+import { US_STATES } from "@/lib/constants";
 
 // Initialize zxcvbn options
 const options = {
@@ -48,14 +49,19 @@ export const authRouter = router({
         password: passwordSchema,
         firstName: z.string().min(1),
         lastName: z.string().min(1),
-        phoneNumber: z.string().regex(/^\+?\d{10,15}$/),
+        phoneNumber: z.string()
+          .transform((val) => val.replace(/\D/g, ''))
+          .refine((digits) => digits.length === 10, "Phone number must be 10 digits")
+          .transform((digits) => `+1${digits}`),
         dateOfBirth: z.string().refine((dob) => {
           return calculateAge(dob) >= 18;
         }, "You must be at least 18 years old to sign up."),
         ssn: z.string().regex(/^\d{9}$/),
         address: z.string().min(1),
         city: z.string().min(1),
-        state: z.string().length(2).toUpperCase(),
+        state: z.enum(US_STATES, {
+          errorMap: () => ({ message: "Invalid state code. Please use a valid 2-letter US state abbreviation (e.g., CA, NY, TX)" })
+        }),
         zipCode: z.string().regex(/^\d{5}$/),
       })
     )
