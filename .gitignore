@@ -45,6 +45,8 @@ next-env.d.ts
 bank.db
 *.db
 *.sqlite
+*.db-shm
+*.db-wal
 
 # IDE
 .vscode/
