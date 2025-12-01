@@ -19,6 +19,7 @@
     "@trpc/next": "^11.1.4",
     "@trpc/react-query": "^11.1.4",
     "@trpc/server": "^11.1.4",
+    "@types/zxcvbn": "^4.4.5",
     "bcryptjs": "^3.0.2",
     "better-sqlite3": "^11.10.0",
     "drizzle-orm": "^0.44.0",
@@ -27,7 +28,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hook-form": "^7.56.4",
-    "zod": "^3.25.36"
+    "zod": "^3.25.36",
+    "zxcvbn": "^4.4.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

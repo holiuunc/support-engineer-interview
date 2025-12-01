@@ -4,14 +4,43 @@ import * as schema from "./schema";
 
 const dbPath = "bank.db";
 
-const sqlite = new Database(dbPath);
+// Singleton pattern for database connection
+let sqliteConnection: Database.Database | null = null;
+
+function getSqliteConnection(): Database.Database {
+  if (!sqliteConnection) {
+    sqliteConnection = new Database(dbPath);
+    // Enable WAL mode for better concurrency
+    sqliteConnection.pragma('journal_mode = WAL');
+  }
+  return sqliteConnection;
+}
+
+const sqlite = getSqliteConnection();
 export const db = drizzle(sqlite, { schema });
 
-const connections: Database.Database[] = [];
+// Graceful shutdown function
+export function closeDb() {
+  if (sqliteConnection) {
+    sqliteConnection.close();
+    sqliteConnection = null;
+  }
+}
+
+// Register shutdown handlers
+if (typeof process !== 'undefined') {
+  process.on('SIGINT', () => {
+    closeDb();
+    process.exit(0);
+  });
+  process.on('SIGTERM', () => {
+    closeDb();
+    process.exit(0);
+  });
+}
 
 export function initDb() {
-  const conn = new Database(dbPath);
-  connections.push(conn);
+  const conn = getSqliteConnection();
 
   // Create tables if they don't exist
   sqlite.exec(`

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
+import zxcvbn from "zxcvbn";
 
 type SignupFormData = {
   email: string;
@@ -104,12 +105,18 @@ export default function SignupPage() {
                       value: 8,
                       message: "Password must be at least 8 characters",
                     },
+                    maxLength: {
+                      value: 64,
+                      message: "Password must not exceed 64 characters",
+                    },
                     validate: {
-                      notCommon: (value) => {
-                        const commonPasswords = ["password", "12345678", "qwerty"];
-                        return !commonPasswords.includes(value.toLowerCase()) || "Password is too common";
-                      },
-                      hasNumber: (value) => /\d/.test(value) || "Password must contain a number",
+                      hasLowercase: (value) => /[a-z]/.test(value) || "Password must contain at least one lowercase letter",
+                      hasUppercase: (value) => /[A-Z]/.test(value) || "Password must contain at least one uppercase letter",
+                      hasNumber: (value) => /[0-9]/.test(value) || "Password must contain at least one number",
+                      hasSpecialChar: (value) =>
+                        /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value) ||
+                        "Password must contain at least one special character",
+                      strongEnough: (value) => zxcvbn(value).score >= 3 || "Password is too weak. Please use a stronger password",
                     },
                   })}
                   type="password"

@@ -6,13 +6,29 @@ import { publicProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import zxcvbn from "zxcvbn";
+import { encrypt } from "@/lib/crypto/encryption";
+
+// Strong password validation schema following NIST SP 800-63B guidelines
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters")
+  .max(64, "Password must not exceed 64 characters")
+  .refine((p) => /[a-z]/.test(p), "Password must contain at least one lowercase letter")
+  .refine((p) => /[A-Z]/.test(p), "Password must contain at least one uppercase letter")
+  .refine((p) => /[0-9]/.test(p), "Password must contain at least one number")
+  .refine(
+    (p) => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(p),
+    "Password must contain at least one special character"
+  )
+  .refine((p) => zxcvbn(p).score >= 3, "Password is too weak. Please use a stronger password");
 
 export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
         email: z.string().email().toLowerCase(),
-        password: z.string().min(8),
+        password: passwordSchema,
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         phoneNumber: z.string().regex(/^\+?\d{10,15}$/),
@@ -35,9 +51,11 @@ export const authRouter = router({
       }
 
       const hashedPassword = await bcrypt.hash(input.password, 10);
+      const encryptedSSN = encrypt(input.ssn);
 
       await db.insert(users).values({
         ...input,
+        ssn: encryptedSSN,
         password: hashedPassword,
       });
 
